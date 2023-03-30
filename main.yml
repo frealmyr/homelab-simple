@@ -1,0 +1,8 @@
+---
+- hosts: gateway
+  become: true
+
+# - import_playbook: playbooks/1-packages.yml
+# - import_playbook: playbooks/2-configure.yml
+
+- import_playbook: stacks/system/traefik/playbook.yml

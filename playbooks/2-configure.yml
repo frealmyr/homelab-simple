@@ -1,0 +1,67 @@
+---
+- hosts: gateway
+  become: true
+  vars:
+    synology_ip: 10.7.0.10
+
+  tasks:
+    - name: set zsh as default shell
+      shell: chsh -s $(which zsh) fredrick
+
+    - name: docker - add user to docker group
+      user: name=fredrick
+        groups=docker
+        append=yes
+
+    - name: fstab - add sdd mount flags
+      replace:
+        backup: yes
+        path: /etc/fstab
+        regexp: '^(\S+)(\s+)(\S+)(\s+)(ext4|xfs|btrfs)(\s+)(((?!{{item}})\S)*)(\s+)(\d)(\s+)(\d)$'
+        replace: '\1\2\3\4\5\6\7,{{item}}\9\10\11\12'
+      with_items:
+        - discard
+        - noatime
+
+    - name: ups - configure nut to use netclient
+      replace:
+        path: /etc/ups/nut.conf
+        regexp: '^MODE=none'
+        replace: 'MODE=netclient'
+      register: nut_netclient
+
+    - name: ups - configure nut to monitor nas
+      lineinfile:
+        path: /etc/ups/upsmon.conf
+        regexp: '^MONITOR.*'
+        line: "MONITOR ups@{{ synology_ip }} 1 monuser secret slave"
+        state: present
+      register: nut_monitor
+
+    - name: ups - restart and enable service
+      service:
+        name: nut-monitor
+        enabled: yes
+        state: restarted
+      when: nut_netclient.changed or nut_monitor.changed
+
+    - name: docker - create homelab dir
+      ansible.builtin.file:
+        path: /var/lib/homelab
+        state: directory
+        mode: 0755
+
+    - name: docker - create homelab dir
+      ansible.builtin.file:
+        path: /home/fredrick/Stacks
+        state: directory
+        mode: 0755
+      become_user: fredrick
+
+    - name: docker - enable and start services
+      service:
+        name: "{{ item }}"
+        enabled: yes
+        state: started
+      with_items:
+        - docker

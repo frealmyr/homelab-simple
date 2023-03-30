@@ -1,0 +1,33 @@
+---
+- hosts: gateway
+  become: true
+
+  tasks:
+    - name: dnf - upgrade latest
+      dnf:
+        name: "*"
+        state: latest
+
+    - name: dnf - add docker repository
+      shell: dnf config-manager -y --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+
+    - name: dnf - system
+      dnf:
+        name:
+          - cronie
+          - nut-client
+          - tuned
+
+    - name: dnf - virtualization & containerization
+      dnf:
+        name:
+          - containerd.io
+          - docker-ce
+          - docker-ce-cli
+          - docker-compose
+          - docker-compose-plugin
+
+    - name: dnf - cli
+      dnf:
+        name:
+          - zsh
