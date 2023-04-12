@@ -1,0 +1,75 @@
+version: '3.5'
+
+networks:
+  traefik-servicenet:
+    external: true
+    name: traefik-servicenet
+  docker-proxynet:
+    driver: bridge
+    internal: true
+
+services:
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    networks:
+      - docker-proxynet
+    environment:
+      - CONTAINERS=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  traefik:
+    image: arm64v8/traefik:latest
+    user: 2000:2000
+    environment:
+      - TZ=Europe/Oslo
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        export CLOUDFLARE_EMAIL="$$(cat /run/secrets/credentials_cloudflare | awk -F= '/CLOUDFLARE_EMAIL/ {print $$2}')"
+        export CLOUDFLARE_API_KEY="$$(cat /run/secrets/credentials_cloudflare | awk -F= '/CLOUDFLARE_API_KEY/ {print $$2}')"
+        ./entrypoint.sh traefik
+    ports:
+      - 80:10080
+      - 443:10443
+    networks:
+      - traefik-servicenet
+      - docker-proxynet
+    volumes:
+      - type: bind
+        target: /etc/traefik/traefik.yml
+        source: ./config/traefik.yml
+      - type: bind
+        target: /etc/traefik/dynamic/
+        source: ./config/dynamic/
+      # Devices
+      - type: bind
+        read_only: true
+        target: /etc/localtime
+        source: /etc/localtime
+      # Secrets
+      - type: bind
+        target: /etc/traefik/acme/acme.json
+        source: /var/lib/homelab/secrets/traefik/acme.json
+      - type: bind
+        read_only: true
+        target: /run/secrets/credentials_cloudflare
+        source: /var/lib/homelab/secrets/traefik/cloudflare_credentials
+    depends_on:
+      - docker-proxy
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    # mem_limit: 2G
+    # cpus: 0.75
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    labels:
+      - autoheal=true
+    restart: unless-stopped

@@ -1,6 +1,5 @@
 all:
   hosts:
-    gateway:
-      ansible_host: 10.0.0.5
+    srv-rpi-01:
+      ansible_host: 10.0.0.70
       ansible_user: fredrick
-      ansible_ssh_private_key_file: ~/.ssh/homelab

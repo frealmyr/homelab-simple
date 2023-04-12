@@ -1,0 +1,40 @@
+version: "3.5"
+
+networks:
+  traefik-servicenet:
+    external: true
+    name: traefik-servicenet
+  docker-proxynet:
+    driver: bridge
+    internal: true
+
+services:
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      - CONTAINERS=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - docker-proxynet
+    restart: unless-stopped
+
+  dozzle:
+    image: amir20/dozzle:latest
+    environment:
+      - DOCKER_TLS_VERIFY=false
+      - DOCKER_HOST=tcp://docker-proxy:2375
+    networks:
+      - traefik-servicenet
+      - docker-proxynet
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.dozzle.entryPoints=https
+      - traefik.http.routers.dozzle.rule=Host(`logs.fmlab.no`)
+      - traefik.http.routers.dozzle.service=dozzle
+      - traefik.http.routers.dozzle.tls.certresolver=letsEncrypt
+      - traefik.http.services.dozzle.loadbalancer.server.port=8080
+      - traefik.http.routers.dozzle.middlewares=security@file
+    depends_on:
+      - docker-proxy
+    restart: unless-stopped

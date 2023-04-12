@@ -1,0 +1,174 @@
+---
+- hosts: all
+  become: true
+  vars:
+    local_user: fredrick
+
+  tasks:
+    ###########
+    ## Users ##
+    ###########
+
+    - name: docker - create non-root users
+      user:
+        uid: "{{ item.id }}"
+        name: "{{ item.name }}"
+        create_home: false
+        shell: /usr/sbin/nologin
+        state: present
+      loop:
+        - { id: 2000, name: traefik }
+        - { id: 2001, name: cloudflare-ddns }
+        - { id: 2002, name: homeassistant }
+        - { id: 2003, name: entertainment }
+        - { id: 2004, name: homer }
+
+    ##############
+    ## Networks ##
+    ##############
+
+    - name: docker - create shared traefik network
+      docker_network:
+        name: traefik-servicenet
+
+    ####################
+    ## Shared Folders ##
+    ####################
+
+    - name: docker - create homelab folders
+      file:
+        path: "{{ item }}"
+        state: directory
+        group: root
+        mode: 0600
+      loop:
+        - /var/lib/homelab
+        - /var/lib/homelab/secrets
+
+    - name: system - create shared media folder
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: 2003
+        group: 2003
+        recurse: true
+        mode: 0777
+      with_items:
+        - /media/shared
+        - /media/shared/anime
+        - /media/shared/anime/series
+        - /media/shared/anime/movies
+        - /media/shared/tv-series
+
+    - name: nfs - add shared media folder export
+      blockinfile:
+        path: /etc/exports
+        block: /media/shared 10.0.0.0/24(rw,all_squash,insecure,async,no_subtree_check,anonuid=2003,anongid=2003)
+
+    - name: nfs - reload nfs exports
+      command: exportfs -ra
+
+    #############
+    ## Secrets ##
+    #############
+
+    - name: docker - create secret sub-directories
+      file:
+        path: "/var/lib/homelab/secrets/{{ item.folder }}"
+        state: directory
+        group: "{{ item.owner }}"
+        mode: 0600
+      loop:
+        - { folder: traefik, owner: traefik }
+        - { folder: cloudflare-ddns, owner: cloudflare-ddns }
+        - { folder: watchtower, owner: root }
+
+    - name: docker - touch secret files
+      file:
+        path: "/var/lib/homelab/secrets/{{ item.file }}"
+        state: touch
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: 0600
+      loop:
+        - { file: traefik/acme.json, owner: traefik, group: traefik }
+
+    # Pull secrets using gcloud cli without base64 decoding the payload
+    ## https://cloud.google.com/sdk/gcloud/reference/secrets/versions/access
+    - name: gcpsm - pull secrets from gcpsm
+      shell: "gcloud secrets versions access latest --secret={{ item.secret }} --format='get(payload.data)' | tr '_-' '/+'"
+      loop:
+        - { secret: homelab-cloudflare, file: traefik/cloudflare_credentials }
+        - { secret: homelab-cloudflare-ddns, file: cloudflare-ddns/cloudflare_credentials }
+      delegate_to: localhost
+      become_user: "{{ local_user }}"
+      register: gcpsm_secret_raw
+
+    # Handover from local cli to remote ansible target
+    - name: gcpsm - set secret fact (for passing from local to remote)
+      set_fact:
+        gcpsm_secret: "{{ gcpsm_secret_raw.results }}"
+
+    - name: gcpsm - pass secret to remote target
+      shell: echo {{ item.stdout }} | base64 -d > /var/lib/homelab/secrets/{{ item.item.file }}
+      with_items: "{{ gcpsm_secret }}"
+      loop_control:
+        label: "{{ item.item.secret }}"
+
+    - name: system - set secret permissions
+      shell: chown {{ item.owner }}:{{ item.group }} /var/lib/homelab/secrets/{{ item.file }}
+      loop:
+        - { file: traefik/cloudflare_credentials, owner: traefik, group: traefik }
+        - { file: cloudflare-ddns/cloudflare_credentials, owner: cloudflare-ddns, group: cloudflare-ddns }
+
+    ############
+    ## Stacks ##
+    ############
+
+    - name: copy - management script
+      copy:
+        src: manage.sh
+        dest: "/home/{{ local_user }}"
+      become_user: "{{ local_user }}"
+
+    - name: copy - stacks folder
+      copy:
+        src: stacks
+        dest: "/home/{{ local_user }}"
+      become_user: "{{ local_user }}"
+
+    ##############
+    ## Webhooks ##
+    ##############
+
+    # Webhooks is usually stored as environment variable without support for exporting a file to env
+    # so workaround is to compromise by storing webhooks in .env file beside the docker-compose.yml file
+
+    - name: gcpsm - grab webhook secret
+      shell: gcloud secrets versions access latest --secret=homelab-discord-webhooks --format='get(payload.data)' | tr '_-' '/+' | base64 -d
+      delegate_to: localhost
+      become_user: "{{ local_user }}"
+      register: gcpsm_secret_webhook_raw
+
+    - name: gcpsm - set secret fact (for passing from local to remote)
+      set_fact:
+        gcpsm_secret_webhook: "{{ gcpsm_secret_webhook_raw.stdout }}"
+
+    - debug:
+        msg: "{{ gcpsm_secret_webhook }}"
+
+    - name: webhook - copy webhook to .env file
+      shell: echo "{{ gcpsm_secret_webhook }}" | awk -F= '/{{ item.webhook }}/ {print $2}' > /var/lib/homelab/secrets/{{ item.filepath }}
+      loop:
+        - { webhook: WEBHOOK_WATCHTOWER, filepath: "watchtower/webhook_url" }
+
+    - name: system - set secret permissions
+      shell: chown {{ item.owner }}:{{ item.group }} /var/lib/homelab/secrets/{{ item.file }}
+      loop:
+        - { file: watchtower/webhook_url, owner: root, group: root }
+
+    # - name: webhook - copy webhook to .env file
+    #   shell: echo "{{ gcpsm_secret_webhook }}" | awk -F= '/{{ item.webhook }}/ {print $2}' | awk '$0="{{ item.target_env }}="$0' > {{ item.env_file }}
+    #   loop:
+    #     - { webhook: WEBHOOK_WATCHTOWER, target_env: "WATCHTOWER_NOTIFICATION_URL", env_file: "/home/{{ local_user }}/stacks/system/watchtower/.env" }
+    #   become_user: "{{ local_user }}"

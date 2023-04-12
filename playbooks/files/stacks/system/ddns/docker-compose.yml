@@ -1,0 +1,19 @@
+version: '3.5'
+
+## No secrets until this is merged:
+## https://github.com/timothymiller/cloudflare-ddns/pull/117
+# secrets:
+#   credentials_cloudflare:
+#     file: /var/lib/homelab/secrets/traefik/cloudflare_credentials
+
+services:
+  cloudflare:
+    image: timothyjmiller/cloudflare-ddns:latest
+    environment:
+      - PUID=2001
+      - PGID=2001
+    volumes:
+      - /var/lib/homelab/secrets/cloudflare-ddns/cloudflare_credentials:/config.json
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

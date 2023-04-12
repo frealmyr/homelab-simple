@@ -1,0 +1,31 @@
+version: "3.5"
+
+networks:
+  traefik-servicenet:
+    external: true
+    name: traefik-servicenet
+
+volumes:
+  data:
+
+services:
+  homebox:
+    image: ghcr.io/hay-kot/homebox:latest
+    environment:
+    - HBOX_LOG_LEVEL=info
+    - HBOX_LOG_FORMAT=text
+    - HBOX_WEB_MAX_UPLOAD_SIZE=100
+    - HBOX_OPTIONS_ALLOW_REGISTRATION=true
+    volumes:
+      - data:/data/
+    networks:
+      - traefik-servicenet
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.homebox.entryPoints=https
+      - traefik.http.routers.homebox.rule=Host(`homebox.fmlab.no`)
+      - traefik.http.routers.homebox.service=homebox
+      - traefik.http.routers.homebox.tls.certresolver=letsEncrypt
+      - traefik.http.services.homebox.loadbalancer.server.port=7745
+      - traefik.http.routers.homebox.middlewares=security@file
+    restart: unless-stopped

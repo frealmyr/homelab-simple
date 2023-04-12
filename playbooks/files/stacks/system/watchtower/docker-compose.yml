@@ -1,0 +1,42 @@
+version: "3.5"
+
+networks:
+  docker-proxynet:
+    driver: bridge
+    internal: true
+
+services:
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    networks:
+      - docker-proxynet
+    environment:
+      - POST=1
+      - CONTAINERS=1
+      - NETWORKS=1
+      - IMAGES=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    networks:
+      - docker-proxynet
+    volumes:
+      # Secrets
+      - type: bind
+        read_only: true
+        target: /run/secrets/discord_webhook
+        source: /var/lib/homelab/secrets/watchtower/webhook_url
+    environment:
+      - TZ=Europe/Oslo
+      - DOCKER_HOST=tcp://docker-proxy:2375
+      - WATCHTOWER_SCHEDULE=0 0 4 * * *
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_NOTIFICATION_URL=/run/secrets/discord_webhook
+      - WATCHTOWER_NOTIFICATIONS=shoutrrr
+      - WATCHTOWER_NOTIFICATIONS_LEVEL=info
+    depends_on:
+      - docker-proxy
+    restart: unless-stopped

@@ -1,8 +1,14 @@
 ---
-- hosts: gateway
+- hosts: all
   become: true
 
-# - import_playbook: playbooks/1-packages.yml
-# - import_playbook: playbooks/2-configure.yml
+- name: checks
+  import_playbook: playbooks/checks.yml
 
-- import_playbook: stacks/system/traefik/playbook.yml
+- import_playbook: playbooks/0-packages.yml
+- import_playbook: playbooks/1-config.yml
+# - import_playbook: playbooks/2-firewall.yml
+- import_playbook: playbooks/3-create-cluster.yml
+# - import_playbook: playbooks/4-workers.yml
+- import_playbook: playbooks/5-kubeconfig.yml
+- import_playbook: playbooks/6-reboot.yml

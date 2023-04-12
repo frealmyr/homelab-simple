@@ -1,0 +1,58 @@
+version: "3.5"
+
+networks:
+  traefik-servicenet:
+    external: true
+    name: traefik-servicenet
+
+volumes:
+  data:
+  work:
+  logs:
+  backups:
+
+services:
+  omada:
+    image: mbentley/omada-controller:latest
+    environment:
+      - TZ=Europe/Oslo
+      - PGID=2004
+      - PUID=2004
+    volumes:
+      - data:/opt/tplink/EAPController/data
+      - work:/opt/tplink/EAPController/work
+      - logs:/opt/tplink/EAPController/logs
+      - backups:/opt/tplink/EAPController/data/autobackup
+    networks:
+      - traefik-servicenet
+    ports:
+      - 10.0.0.70:29810:29810/tcp
+      - 10.0.0.70:29811:29811/tcp
+      - 10.0.0.70:29812:29812/tcp
+      - 10.0.0.70:29813:29813/tcp
+      - 10.0.0.70:29814:29814/tcp
+      - 10.0.0.70:29810:29810/udp
+      - 10.0.0.70:29811:29811/udp
+      - 10.0.0.70:29812:29812/udp
+      - 10.0.0.70:29813:29813/udp
+      - 10.0.0.70:29814:29814/udp
+    labels:
+      - "traefik.enable=true"
+      # Login page without middleware
+      - "traefik.http.routers.omada-login.rule=Host(`omada.fmlab.no`) && Path(`/`, `/login`)"
+      - "traefik.http.routers.omada-login.entrypoints=https"
+      - "traefik.http.routers.omada-login.tls.certresolver=letsEncrypt"
+      - "traefik.http.routers.omada-login.service=omada"
+      # Main page with middleware for port un-redirection
+      - "traefik.http.routers.omada-https.rule=Host(`omada.fmlab.no`)"
+      - "traefik.http.routers.omada-https.entrypoints=https"
+      - "traefik.http.routers.omada-https.middlewares=omada-headers@docker"
+      - "traefik.http.routers.omada-https.tls.certresolver=letsEncrypt"
+      - "traefik.http.routers.omada-https.service=omada"
+      # Removes port from host header
+      - "traefik.http.middlewares.omada-headers.headers.customrequestheaders.Host=omada.fmlab.no:8043"
+      - "traefik.http.middlewares.omada-headers.headers.customresponseheaders.Host=omada.fmlab.no"
+      # Shared omada service
+      - "traefik.http.services.omada.loadbalancer.server.port=8043"
+      - "traefik.http.services.omada.loadbalancer.server.scheme=https"
+    restart: unless-stopped
